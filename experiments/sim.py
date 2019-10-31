@@ -20,7 +20,7 @@ from robot import Robot
 
 
 class PyBulletSim(gym.Env):
-    def __init__(self, gui=True, timeStep=0.01, NAgents=2):
+    def __init__(self, gui=True, timeStep=0.01, NAgents=2, maxEpisodeLength=1000):
         self._timeStep = timeStep
         #################################
         #########SET UP PYBULLET#########
@@ -54,13 +54,13 @@ class PyBulletSim(gym.Env):
         for i in range(self.NAgents):
             self.robots.append(
                 Robot(self._timeStep, pos=positions[i], rot=rotations[i]))
-        maxVelocity, timeStep, joints = self.robots[0].getConfigs()
+        maxVelocity, timeStep, Njoints = self.robots[0].getConfigs()
 
         #################################
         #######SET UP ACTION SPACE#######
         #################################
-        action_dim = joints * self.NAgents
-        action_high = np.array([maxVelocity*timeStep*10] * action_dim)
+        action_dim = Njoints
+        action_high = np.array([maxVelocity*timeStep] * action_dim)
         self.action_space = []
         for _ in range(self.NAgents):
             self.action_space.append(spaces.Box(-action_high,
@@ -72,7 +72,8 @@ class PyBulletSim(gym.Env):
         #################################
         self._observation = []
         # Each agents have 6 joints and box position and poses
-        observation_dim = (joints * self.NAgents + 7) * self.NAgents
+        # observation dimension for each agent
+        observation_dim = Njoints * self.NAgents + 7
         observation_high = np.array([1] * observation_dim)
         self.observation_space = []
         for _ in range(self.NAgents):
@@ -83,7 +84,7 @@ class PyBulletSim(gym.Env):
         #################################
         #####OTHER OPENAI GYM STUFF######
         #################################
-        self._max_episode_steps = 1000
+        self._max_episode_steps = maxEpisodeLength
         self._current_episode_step = 0
         ### TEMP FOR DEBUGGING ###
 
@@ -94,12 +95,13 @@ class PyBulletSim(gym.Env):
         self.terminate_episode = False
         for robot in self.robots:
             robot.reset()
+        time.sleep(0.05)
         self._current_episode_step = 0
         self.resetBox()
         p.stepSimulation()
         self._observation = self._getObservation()
         reward = self._getReward()
-        return self._observation, reward, False, {}
+        return self._observation
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -132,7 +134,7 @@ class PyBulletSim(gym.Env):
         return np.array(observation)
 
     def step(self, actions):
-        assert len(actions) != self.NAgents, "Wrong Action Dimensions"
+        assert len(actions) == self.NAgents, "Wrong Action Dimensions"
         self._current_episode_step += 1
         for i, robot in enumerate(self.robots):
             robot.applyAction(actions[i])
@@ -140,8 +142,7 @@ class PyBulletSim(gym.Env):
         for _ in range(10):
             p.stepSimulation()
             reward += self._getReward()
-        done = self.terminate_episode or\
-            self._current_episode_step >= self._max_episode_steps
+        done = self.terminate_episode or self._current_episode_step >= self._max_episode_steps
         if not done and self._gui:
             self._observation = self._getObservation()
         return self._observation, reward, done, {}
@@ -151,7 +152,6 @@ class PyBulletSim(gym.Env):
         for robot in self.robots:
             if p.getContactPoints(self._boxId, robot._palm_body_id) != ():
                 reward.append(100)
-                self.terminate_episode = True
             else:
                 reward.append(-0.01)
         return reward
