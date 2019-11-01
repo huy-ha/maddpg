@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import time
 import pickle
+import os
 
 import maddpg.common.tf_util as U
 from maddpg.trainer.maddpg import MADDPGAgentTrainer
@@ -14,7 +15,7 @@ def parse_args():
         "Reinforcement Learning experiments for multiagent environments")
     # Environment
     parser.add_argument("--max-episode-len", type=int,
-                        default=1000, help="maximum episode length")
+                        default=5000, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int,
                         default=60000, help="number of episodes")
     parser.add_argument("--num-adversaries", type=int,
@@ -37,7 +38,7 @@ def parse_args():
                         help="name of the experiment")
     parser.add_argument("--save-dir", type=str, default="/tmp/policy/",
                         help="directory in which training state and model should be saved")
-    parser.add_argument("--save-rate", type=int, default=1000,
+    parser.add_argument("--save-rate", type=int, default=500,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="",
                         help="directory in which training state and model are loaded")
@@ -67,11 +68,11 @@ def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=Non
         return out
 
 
-def make_env():
+def make_env(arglist):
     import sys
     sys.path.insert(1, '/path/to/application/app/folder')
     from sim import PyBulletSim
-    env = PyBulletSim(NAgents=2)
+    env = PyBulletSim(NAgents=2, maxEpisodeLength=arglist.max_episode_len)
     return env
 
 
@@ -90,7 +91,7 @@ def get_trainers(env, nAgents, obs_shape_n, arglist):
 def train(arglist):
     with U.single_threaded_session():
         # Create environment
-        env = make_env()
+        env = make_env(arglist)
         # Create agent trainers
         obs_shape_n = [
             env.observation_space[i].shape for i in range(env.NAgents)]
@@ -127,14 +128,13 @@ def train(arglist):
                         for agent, obs in zip(trainers, obs_n)]
             # environment step
             # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
-            new_obs_n, rew_n, done_n, _ = env.step(action_n)
+            new_obs_n, rew_n, done, _ = env.step(action_n)
             episode_step += 1
-            done = all(done_n)
             terminal = (episode_step >= arglist.max_episode_len)
             # collect experience
             for i, agent in enumerate(trainers):
                 agent.experience(
-                    obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
+                    obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done, terminal)
             obs_n = new_obs_n
 
             for i, rew in enumerate(rew_n):
@@ -183,24 +183,19 @@ def train(arglist):
                 print("steps: {}, episodes: {}, mean episode reward: {}, time: {}".format(
                     train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
                 t_start = time.time()
-                # Keep track of final episode reward
-                final_ep_rewards.append(
-                    np.mean(episode_rewards[-arglist.save_rate:]))
-                for rew in agent_rewards:
-                    final_ep_ag_rewards.append(
-                        np.mean(rew[-arglist.save_rate:]))
-
-            # saves final episode reward for plotting training curve later
-            if len(episode_rewards) > arglist.num_episodes:
+                if not os.path.exists(arglist.plots_dir):
+                    os.makedirs(arglist.plots_dir)
                 rew_file_name = arglist.plots_dir + arglist.exp_name + '_rewards.pkl'
                 with open(rew_file_name, 'wb') as fp:
-                    pickle.dump(final_ep_rewards, fp)
+                    pickle.dump(episode_rewards, fp)
                 agrew_file_name = arglist.plots_dir + arglist.exp_name + '_agrewards.pkl'
                 with open(agrew_file_name, 'wb') as fp:
-                    pickle.dump(final_ep_ag_rewards, fp)
-                print('...Finished total of {} episodes.'.format(
-                    len(episode_rewards)))
-                break
+                    pickle.dump(agent_rewards, fp)
+
+                if len(episode_rewards) > arglist.num_episodes:
+                    print('...Finished total of {} episodes.'.format(
+                        len(episode_rewards)))
+                    break
 
 
 if __name__ == '__main__':
