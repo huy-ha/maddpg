@@ -12,6 +12,7 @@ import math
 import matplotlib.pyplot as plt
 import pybullet as p
 import pybullet_data
+from datetime import datetime
 
 import gym
 from gym import spaces
@@ -119,7 +120,10 @@ class PyBulletSim(gym.Env):
         boxObservation = np.concatenate((boxPos, boxRot))
         for i in range(len(self.robots)):
             robotObservation = np.array([])
-            # Box position and rotation
+
+            # Relative box position and rotation
+            boxObservation = np.concatenate(
+                (boxPos - self.robots[i]._pos, boxRot))
             robotObservation = np.concatenate(
                 (robotObservation, boxObservation))
             # Self Joints
@@ -136,25 +140,50 @@ class PyBulletSim(gym.Env):
     def step(self, actions):
         assert len(actions) == self.NAgents, "Wrong Action Dimensions"
         self._current_episode_step += 1
+        rewards = np.zeros(len(self.robots))
         for i, robot in enumerate(self.robots):
-            robot.applyAction(actions[i])
-        reward = np.zeros(len(self.robots))
-        for _ in range(10):
-            p.stepSimulation()
-            reward += self._getReward()
+            # penalize for illegal move
+            if not robot.applyAction(actions[i]):
+                rewards[i] -= 10
+        p.stepSimulation()
+        rewards += self._getReward()
         done = self.terminate_episode or self._current_episode_step >= self._max_episode_steps
         if not done and self._gui:
             self._observation = self._getObservation()
-        return self._observation, reward, done, {}
+        return self._observation, rewards, done, {}
 
     def _getReward(self):
-        reward = []
-        for robot in self.robots:
-            if p.getContactPoints(self._boxId, robot._palm_body_id) != ():
-                reward.append(100)
+        rewards = np.zeros(len(self.robots))
+        for i, robot in enumerate(self.robots):
+            touchedBox = p.getContactPoints(
+                self._boxId, robot._palm_body_id) != ()
+            touchedGround = p.getContactPoints(
+                self._plane_id, robot._palm_body_id) != ()
+            touchedPalmSelf = p.getContactPoints(
+                robot._robot_body_id, robot._palm_body_id) != ()
+            touchedSelf = p.getContactPoints(
+                robot._robot_body_id, robot._robot_body_id) != ()
+            if touchedBox:
+                rewards[i] += 1000
             else:
-                reward.append(-0.01)
-        return reward
+                rewards[i] += -0.01
+
+            if touchedPalmSelf:
+                rewards[i] -= 1
+
+            if touchedSelf:
+                rewards[i] -= 1
+                print("[{}] {} self collision!".format(
+                    int(round(time.time() * 1000)) % 100000, i))
+                time.sleep(0.5)
+            else:
+                print("[{}] {} no self collision".format(
+                    int(round(time.time() * 1000)) % 100000, i))
+
+            if touchedGround:
+                rewards[i] -= 1
+
+        return rewards
 
     def resetBox(self):
         random_orientation = [
