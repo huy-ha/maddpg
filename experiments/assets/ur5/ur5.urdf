@@ -175,11 +175,11 @@
       </geometry>
       <material name="LightGrey"/>
     </visual>
-    <collision>
+    <!--<collision>
       <geometry>
         <mesh filename="collision/wrist3.stl"/>
       </geometry>
-    </collision>
+    </collision> -->
     <inertial>
       <mass value="0.1879"/>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
@@ -192,12 +192,12 @@
     <origin rpy="-1.5707963267948966 0.0 0.0" xyz="0.0 0.0823 0.0"/>
   </joint>
   <link name="ee_link">
-    <collision>
+    <!--<collision>
       <geometry>
         <box size="0.01 0.01 0.01"/>
       </geometry>
       <origin rpy="0 0 0" xyz="-0.01 0 0"/>
-    </collision>
+    </collision> -->
     <inertial>
       <mass value="0.0"/>
       <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
