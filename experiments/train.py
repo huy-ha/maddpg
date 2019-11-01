@@ -38,7 +38,7 @@ def parse_args():
                         help="name of the experiment")
     parser.add_argument("--save-dir", type=str, default="/tmp/policy/",
                         help="directory in which training state and model should be saved")
-    parser.add_argument("--save-rate", type=int, default=500,
+    parser.add_argument("--save-rate", type=int, default=100,
                         help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="",
                         help="directory in which training state and model are loaded")
@@ -59,6 +59,8 @@ def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=Non
     # This model takes as input an observation and returns values of all actions
     with tf.variable_scope(scope, reuse=reuse):
         out = input
+        out = layers.fully_connected(
+            out, num_outputs=num_units, activation_fn=tf.nn.relu)
         out = layers.fully_connected(
             out, num_outputs=num_units, activation_fn=tf.nn.relu)
         out = layers.fully_connected(
@@ -144,6 +146,7 @@ def train(arglist):
             if done or terminal:
                 obs_n = env.reset()
                 episode_step = 0
+                print("Episode {}".format(len(episode_rewards)))
                 episode_rewards.append(0)
                 for a in agent_rewards:
                     a.append(0)
