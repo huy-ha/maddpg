@@ -26,26 +26,48 @@ class Robot:
             # p.URDF_USE_SELF_COLLISION,
             # p.URDF_USE_SELF_COLLISION_INCLUDE_PARENT
         )
+
         self._mount_body_id = p.loadURDF(
             "assets/ur5/mount.urdf",
             np.add(self._pos, [0, 0, 0.2]),
             p.getQuaternionFromEuler([0, 0, 0]))
+        # for _ in range(200):
+        #     p.stepSimulation()
+        #     time.sleep(0.02)
 
         # Get revolute joint indices of robot (skip fixed joints)
         robot_joint_info = [p.getJointInfo(self._robot_body_id, i) for i in range(
             p.getNumJoints(self._robot_body_id))]
         self._robot_joint_indices = [
             x[0] for x in robot_joint_info if x[2] == p.JOINT_REVOLUTE]
+        # for joint_id_1 in self._robot_joint_indices:
+        #     for joint_id_2 in self._robot_joint_indices:
+        #         if joint_id_1 != joint_id_2:
+        #             p.setCollisionFilterPair(
+        #                 self._robot_body_id, self._robot_body_id, joint_id_1, joint_id_2, 1)
+        self._robot_joint_lower_limits = [
+            x[8] for x in robot_joint_info if x[2] == p.JOINT_REVOLUTE]
+        self._robot_joint_upper_limits = [
+            x[9] for x in robot_joint_info if x[2] == p.JOINT_REVOLUTE]
         self._joint_epsilon = 0.01
 
         self._robot_home_joint_config = [-np.pi, -np.pi/2,
                                          np.pi/2, -np.pi/2,
                                          -np.pi/2, 0]
-        # Attach gripper to UR5 robot
+        # self._robot_home_joint_config = [0, 0, 0, 0, 0, 0]
+
         self._palm_body_id = p.loadURDF("assets/palm/palm.urdf",
                                         # p.URDF_USE_SELF_COLLISION,
                                         # p.URDF_USE_SELF_COLLISION_INCLUDE_PARENT
                                         )
+
+        p.changeDynamics(self._palm_body_id,
+                         -1,
+                         lateralFriction=1.0,
+                         spinningFriction=1.0,
+                         rollingFriction=0.0001,
+                         frictionAnchor=True)
+
         self.reset()
 
         self._robot_tool_joint_idx = 9
@@ -63,25 +85,6 @@ class Robot:
                            childFrameOrientation=p.getQuaternionFromEuler([0, np.pi/2, 0]))
         for _ in range(100):
             p.stepSimulation()
-        self._tool_tip_to_ee_joint = [0, 0, 0.17]
-
-        # Define Denavit-Hartenberg parameters for UR5
-        self._ur5_kinematics_d = np.array(
-            [0.089159, 0., 0., 0.10915, 0.09465, 0.0823])
-        self._ur5_kinematics_a = np.array([0., -0.42500, -0.39225, 0., 0., 0.])
-
-        # Set friction coefficients for gripper fingers
-        for i in range(p.getNumJoints(self._palm_body_id)):
-            p.changeDynamics(self._palm_body_id,
-                             i,
-                             lateralFriction=1.0,
-                             spinningFriction=1.0,
-                             rollingFriction=0.0001,
-                             frictionAnchor=True)
-
-        # Start thread to handle additional gripper constraints (gripper joint mimic behavior)
-        # set one joint as the open/close motor joint (other joints should mimic)
-        self._gripper_motor_joint_idx = 1
 
     def getConfigs(self):
         # MaxVelocity, TimeStep,Joints
@@ -91,12 +94,15 @@ class Robot:
         current_joint_state = [p.getJointState(self._robot_body_id, i)[
             0] for i in self._robot_joint_indices]
         target_joint_state = current_joint_state + action
+        atupper = target_joint_state >= self._robot_joint_upper_limits
+        atlower = target_joint_state <= self._robot_joint_lower_limits
         p.setJointMotorControlArray(self._robot_body_id,
                                     self._robot_joint_indices,
                                     p.POSITION_CONTROL,
                                     target_joint_state,
                                     positionGains=0.005*np.ones(
                                         len(self._robot_joint_indices)))
+        return not any(atlower) or any(atupper)
 
     def getJoints(self):
         return [p.getJointState(self._robot_body_id, i)[
@@ -112,8 +118,14 @@ class Robot:
                                               np.add(self._pos, [
                                                      -0.5, -0.1, 0.8]),
                                               p.getQuaternionFromEuler([0, np.pi/2, 0]))
+            # p.resetBasePositionAndOrientation(self._palm_body_id,
+            #                                   np.add(self._pos, [
+            #                                          0.8, 0.25, 0.4]),
+            #                                   p.getQuaternionFromEuler([0, 0, np.pi/2]))
         elif self._robot_body_id == 5:
             p.resetBasePositionAndOrientation(self._palm_body_id,
                                               np.add(self._pos, [
                                                      0.5, 0.1, 0.8]),
                                               p.getQuaternionFromEuler([0, np.pi/2, 0]))
+            # p.resetBasePositionAndOrientation(self._palm_body_id,
+            #                                   np.add(self._pos, [-0.8, -0.25, 0.4]), p.getQuaternionFromEuler([0, 0, np.pi/2]))
