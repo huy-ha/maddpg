@@ -144,7 +144,7 @@ class PyBulletSim(gym.Env):
         for i, robot in enumerate(self.robots):
             # penalize for illegal move
             if not robot.applyAction(actions[i]):
-                rewards[i] -= 10
+                rewards[i] -= 1
         p.stepSimulation()
         rewards += self._getReward()
         done = self.terminate_episode or self._current_episode_step >= self._max_episode_steps
@@ -161,28 +161,20 @@ class PyBulletSim(gym.Env):
                 self._plane_id, robot._palm_body_id) != ()
             touchedPalmSelf = p.getContactPoints(
                 robot._robot_body_id, robot._palm_body_id) != ()
-            touchedSelf = p.getContactPoints(
-                robot._robot_body_id, robot._robot_body_id) != ()
+            # touchedSelf = p.getContactPoints(
+            #     robot._robot_body_id, robot._robot_body_id) != ()
             if touchedBox:
-                rewards[i] += 1000
-            else:
-                rewards[i] += -0.01
-
+                rewards[i] += 10000
+                # print("[{}] {} touched box!".format(
+                #     datetime.now().strftime("%H:%M:%S"), i))
             if touchedPalmSelf:
                 rewards[i] -= 1
-
-            if touchedSelf:
-                rewards[i] -= 1
-                print("[{}] {} self collision!".format(
-                    int(round(time.time() * 1000)) % 100000, i))
-                time.sleep(0.5)
-            else:
-                print("[{}] {} no self collision".format(
-                    int(round(time.time() * 1000)) % 100000, i))
-
+            # if touchedSelf:
+            #     rewards[i] -= 1
+            #     print("[{}] {} self collision!".format(
+            #         int(round(time.time() * 1000)) % 100000, i))
             if touchedGround:
                 rewards[i] -= 1
-
         return rewards
 
     def resetBox(self):
