@@ -80,6 +80,8 @@ class PyBulletSim(gym.Env):
         self._max_episode_steps = maxEpisodeLength
         self._current_episode_step = 0
         ### TEMP FOR DEBUGGING ###
+        self._read_time_debug = p.addUserDebugParameter(
+            'real-time', 0.0, 1.0, 0.0)
 
         self.seed()  # TODO
         self.reset()
@@ -131,6 +133,7 @@ class PyBulletSim(gym.Env):
 
     def step(self, actions):
         assert len(actions) == self.NAgents, "Wrong Action Dimensions"
+
         self._current_episode_step += 1
         rewards = np.zeros(len(self.robots))
         # Compute target joint state
@@ -142,6 +145,8 @@ class PyBulletSim(gym.Env):
 
         for _ in range(self._actionSteps):
             p.stepSimulation()
+            if p.readUserDebugParameter(self._read_time_debug) == 1.0:
+                time.sleep(0.01)
             rewards += self._getReward()
 
         # Punish agent if suggested illegal action
