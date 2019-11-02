@@ -23,9 +23,6 @@ from robot import Robot
 class PyBulletSim(gym.Env):
     def __init__(self, gui=True, timeStep=0.01, NAgents=2, maxEpisodeLength=1000):
         self._timeStep = timeStep
-        #################################
-        #########SET UP PYBULLET#########
-        #################################
         self._p = p
         self._gui = gui
         if gui:
@@ -41,11 +38,10 @@ class PyBulletSim(gym.Env):
 
         self._plane_id = p.loadURDF("plane.urdf")
         self._boxId = p.loadURDF("assets/objects/cube/cube.urdf")
-
-        #################################
-        ######TEMP MULTI-AGENT SETUP#####
-        #################################
+        # how many steps to stepSimulation before punishing illegal actions
+        self._actionSteps = 50
         self.NAgents = NAgents
+
         #################################
         ##########SET UP ROBOT###########
         #################################
@@ -61,12 +57,10 @@ class PyBulletSim(gym.Env):
         #######SET UP ACTION SPACE#######
         #################################
         action_dim = Njoints
-        action_high = np.array([maxVelocity*timeStep] * action_dim)
-        self.action_space = []
-        for _ in range(self.NAgents):
-            self.action_space.append(spaces.Box(-action_high,
-                                                action_high))
-        self.action_space = np.array(self.action_space)
+        action_high = np.array(
+            [maxVelocity*timeStep*self._actionSteps] * action_dim)
+        self.action_space = np.array(
+            [spaces.Box(-action_high, action_high) for _ in range(self.NAgents)])
 
         #################################
         ####SET UP OBSERVATION SPACE#####
@@ -76,11 +70,9 @@ class PyBulletSim(gym.Env):
         # observation dimension for each agent
         observation_dim = Njoints * self.NAgents + 7
         observation_high = np.array([1] * observation_dim)
-        self.observation_space = []
-        for _ in range(self.NAgents):
-            self.observation_space.append(spaces.Box(-observation_high,
-                                                     observation_high))
-        self.observation_space = np.array(self.observation_space)
+        self.observation_space = np.array(
+            [spaces.Box(-observation_high, observation_high) for _ in range(self.NAgents)])
+
         self.viewer = None  # TODO what is this for
         #################################
         #####OTHER OPENAI GYM STUFF######
@@ -96,19 +88,19 @@ class PyBulletSim(gym.Env):
         self.terminate_episode = False
         for robot in self.robots:
             robot.reset()
-        time.sleep(0.05)
+        for _ in range(50):
+            p.stepSimulation()
+
         self._current_episode_step = 0
         self.resetBox()
         p.stepSimulation()
         self._observation = self._getObservation()
-        reward = self._getReward()
         return self._observation
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    # TODO check
     def _getObservation(self):
         robotJoints = []
         for robot in self.robots:
@@ -141,12 +133,22 @@ class PyBulletSim(gym.Env):
         assert len(actions) == self.NAgents, "Wrong Action Dimensions"
         self._current_episode_step += 1
         rewards = np.zeros(len(self.robots))
+        # Compute target joint state
+        target_joint_states = [robot.getJoints() + action
+                               for robot, action in zip(self.robots, actions)]
+        # Set Robot's target joint state
         for i, robot in enumerate(self.robots):
-            # penalize for illegal move
-            if not robot.applyAction(actions[i]):
+            robot.setTargetJointState(target_joint_states[i])
+
+        for _ in range(self._actionSteps):
+            p.stepSimulation()
+            rewards += self._getReward()
+
+        # Punish agent if suggested illegal action
+        for i, robot in enumerate(self.robots):
+            actual_joint_state = robot.getJoints()
+            if not all([np.abs(actual_joint_state[joint_id]-target_joint_states[i][joint_id]) < 0.01 for joint_id in range(6)]):
                 rewards[i] -= 1
-        p.stepSimulation()
-        rewards += self._getReward()
         done = self.terminate_episode or self._current_episode_step >= self._max_episode_steps
         if not done and self._gui:
             self._observation = self._getObservation()
@@ -157,24 +159,24 @@ class PyBulletSim(gym.Env):
         for i, robot in enumerate(self.robots):
             touchedBox = p.getContactPoints(
                 self._boxId, robot._palm_body_id) != ()
-            touchedGround = p.getContactPoints(
-                self._plane_id, robot._palm_body_id) != ()
-            touchedPalmSelf = p.getContactPoints(
-                robot._robot_body_id, robot._palm_body_id) != ()
+            # touchedGround = p.getContactPoints(
+            #     self._plane_id, robot._palm_body_id) != ()
+            # touchedPalmSelf = p.getContactPoints(
+            #     robot._robot_body_id, robot._palm_body_id) != ()
             # touchedSelf = p.getContactPoints(
             #     robot._robot_body_id, robot._robot_body_id) != ()
             if touchedBox:
-                rewards[i] += 10000
+                rewards[i] += 1
                 # print("[{}] {} touched box!".format(
                 #     datetime.now().strftime("%H:%M:%S"), i))
-            if touchedPalmSelf:
-                rewards[i] -= 1
+            # if touchedPalmSelf:
+            #     rewards[i] -= 1
             # if touchedSelf:
             #     rewards[i] -= 1
             #     print("[{}] {} self collision!".format(
             #         int(round(time.time() * 1000)) % 100000, i))
-            if touchedGround:
-                rewards[i] -= 1
+            # if touchedGround:
+            #     rewards[i] -= 1
         return rewards
 
     def resetBox(self):
@@ -185,5 +187,5 @@ class PyBulletSim(gym.Env):
 
         p.resetBasePositionAndOrientation(
             self._boxId, [0, 1*(np.random.random_sample()-0.5), 0.3], p.getQuaternionFromEuler(random_orientation))
-        for _ in range(50):
+        for _ in range(10):
             p.stepSimulation()
