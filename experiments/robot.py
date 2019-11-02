@@ -4,7 +4,7 @@ import time
 
 
 class Robot:
-    def __init__(self, timeStep, pos=None, maxVelocity=0.1, maxForce=10000, rot=None):
+    def __init__(self, timeStep, pos=None, maxVelocity=0.2, maxForce=10000, rot=None):
         if pos is None:
             pos = np.array([0, 0, 0])
         if rot is None:
@@ -87,7 +87,8 @@ class Robot:
                                     p.POSITION_CONTROL,
                                     self.target_joint_state,
                                     positionGains=0.1*self._maxVelocity*np.ones(
-                                        len(self._robot_joint_indices)))
+                                        len(self._robot_joint_indices))
+                                    )
 
     def getJoints(self):
         return [p.getJointState(self._robot_body_id, i)[
