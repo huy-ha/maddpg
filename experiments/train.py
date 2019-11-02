@@ -4,6 +4,7 @@ import tensorflow as tf
 import time
 import pickle
 import os
+import datetime
 
 import maddpg.common.tf_util as U
 from maddpg.trainer.maddpg import MADDPGAgentTrainer
@@ -15,7 +16,7 @@ def parse_args():
         "Reinforcement Learning experiments for multiagent environments")
     # Environment
     parser.add_argument("--max-episode-len", type=int,
-                        default=5000, help="maximum episode length")
+                        default=50, help="maximum episode length")
     parser.add_argument("--num-episodes", type=int,
                         default=60000, help="number of episodes")
     parser.add_argument("--num-adversaries", type=int,
@@ -29,7 +30,7 @@ def parse_args():
                         help="learning rate for Adam optimizer")
     parser.add_argument("--gamma", type=float,
                         default=0.95, help="discount factor")
-    parser.add_argument("--batch-size", type=int, default=1024,
+    parser.add_argument("--batch-size", type=int, default=256,
                         help="number of episodes to optimize at the same time")
     parser.add_argument("--num-units", type=int, default=64,
                         help="number of units in the mlp")
@@ -71,8 +72,6 @@ def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=Non
 
 
 def make_env(arglist):
-    import sys
-    sys.path.insert(1, '/path/to/application/app/folder')
     from sim import PyBulletSim
     env = PyBulletSim(NAgents=2, maxEpisodeLength=arglist.max_episode_len)
     return env
@@ -82,7 +81,7 @@ def get_trainers(env, nAgents, obs_shape_n, arglist):
     trainers = []
     model = mlp_model
     trainer = MADDPGAgentTrainer
-    # TODO look into MADDPGAgentTrainer
+
     for i in range(nAgents):
         trainers.append(trainer(
             "agent_%d" % i, model, obs_shape_n, env.action_space, i, arglist,
@@ -116,6 +115,7 @@ def train(arglist):
                          for _ in range(env.NAgents)]  # individual agent reward
         final_ep_rewards = []  # sum of rewards for training curve
         final_ep_ag_rewards = []  # agent rewards for training curve
+        losses = []
         # agent_info = [[[]]]  # placeholder for benchmarking info
         saver = tf.train.Saver()
         obs_n = env.reset()
@@ -129,7 +129,6 @@ def train(arglist):
             action_n = [agent.action(obs)
                         for agent, obs in zip(trainers, obs_n)]
             # environment step
-            # new_obs_n, rew_n, done_n, info_n = env.step(action_n)
             new_obs_n, rew_n, done, _ = env.step(action_n)
             episode_step += 1
             terminal = (episode_step >= arglist.max_episode_len)
@@ -146,32 +145,12 @@ def train(arglist):
             if done or terminal:
                 obs_n = env.reset()
                 episode_step = 0
-                print("Episode {}".format(len(episode_rewards)))
                 episode_rewards.append(0)
                 for a in agent_rewards:
                     a.append(0)
-                # agent_info.append([[]])
 
             # increment global step counter
             train_step += 1
-
-            # for benchmarking learned policies
-            # if arglist.benchmark:
-            #     for i, info in enumerate(info_n):
-            #         agent_info[-1][i].append(info_n['n'])
-            #     if train_step > arglist.benchmark_iters and (done or terminal):
-            #         file_name = arglist.benchmark_dir + arglist.exp_name + '.pkl'
-            #         print('Finished benchmarking, now saving...')
-            #         with open(file_name, 'wb') as fp:
-            #             pickle.dump(agent_info[:-1], fp)
-            #         break
-            #     continue
-
-            # for displaying learned policies
-            if arglist.display:
-                time.sleep(0.1)
-                env.render()
-                continue
 
             # update all trainers, if not in display or benchmark mode
             loss = None
@@ -179,12 +158,14 @@ def train(arglist):
                 agent.preupdate()
             for agent in trainers:
                 loss = agent.update(trainers, train_step)
+            if loss != None:
+                losses.append((loss, train_step))
 
             # save model, display training output
             if terminal and (len(episode_rewards) % arglist.save_rate == 0):
                 U.save_state(arglist.save_dir, saver=saver)
-                print("steps: {}, episodes: {}, mean episode reward: {}, time: {}".format(
-                    train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
+                print("[{}] steps: {}, episodes: {}, mean episode reward: {}, time: {}".format(
+                    datetime.datetime.now().strftime("%H:%M:%S"), train_step, len(episode_rewards), np.mean(episode_rewards[-arglist.save_rate:]), round(time.time()-t_start, 3)))
                 t_start = time.time()
                 if not os.path.exists(arglist.plots_dir):
                     os.makedirs(arglist.plots_dir)
@@ -194,6 +175,10 @@ def train(arglist):
                 agrew_file_name = arglist.plots_dir + arglist.exp_name + '_agrewards.pkl'
                 with open(agrew_file_name, 'wb') as fp:
                     pickle.dump(agent_rewards, fp)
+                if len(losses) > 0:
+                    losses_file_name = arglist.plots_dir + arglist.exp_name + '_losses.pkl'
+                    with open(losses_file_name, 'wb') as fp:
+                        pickle.dump(losses, fp)
 
                 if len(episode_rewards) > arglist.num_episodes:
                     print('...Finished total of {} episodes.'.format(
